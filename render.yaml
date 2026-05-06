@@ -22,6 +22,14 @@ services:
         generateValue: true
       - key: ALLOWED_ORIGINS
         value: https://intellitrack-frontend-gue5.onrender.com
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: QDRANT_URL
+        sync: false
+      - key: QDRANT_API_KEY
+        sync: false
+      - key: LLM_MODEL
+        value: gpt-4o-mini
 
   # ── 2. Frontend (React/Vite static site) ───────────────────────────────────
   - type: web
