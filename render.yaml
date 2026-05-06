@@ -21,7 +21,7 @@ services:
       - key: SECRET_KEY
         generateValue: true
       - key: ALLOWED_ORIGINS
-        value: https://intellitrack-frontend.onrender.com
+        value: https://intellitrack-frontend-gue5.onrender.com
 
   # ── 2. Frontend (React/Vite static site) ───────────────────────────────────
   - type: web
@@ -32,7 +32,7 @@ services:
     staticPublishPath: dist
     envVars:
       - key: VITE_API_URL
-        value: https://intellitrack-backend.onrender.com
+        value: https://intellitrack-backend-gue5.onrender.com
 
   # ── 3. LLM / AI Service (FastAPI) ──────────────────────────────────────────
   - type: web
