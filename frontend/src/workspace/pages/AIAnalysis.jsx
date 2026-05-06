@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useWorkspace } from "../WorkspaceApp";
 import { agileAPI, issuesAPI } from "../api";
 import { LiquidMetalButton } from "../../components/ui/liquid-metal-button";
@@ -7,6 +7,7 @@ import {
   Loader2, CheckCircle2, Clock, Circle,
   AlertTriangle, RefreshCw, ChevronDown, ChevronUp,
   Zap, Lock, GitBranch, CheckSquare, Square,
+  Send, Bot, User as UserIcon, MessageSquare,
 } from "lucide-react";
 
 const STATUS_META = {
@@ -172,6 +173,37 @@ export default function AIAnalysis() {
       clearInterval(ticker);
       setLoading(false);
       setStep("");
+    }
+  };
+
+  // ── Chat state ────────────────────────────────────────────────────────────
+  const [chatMessages, setChatMessages] = useState([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatError, setChatError] = useState(null);
+  const chatBottomRef = useRef(null);
+
+  useEffect(() => {
+    chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chatMessages]);
+
+  const handleChat = async (e) => {
+    e?.preventDefault();
+    const q = chatInput.trim();
+    if (!q || chatLoading) return;
+    setChatInput("");
+    setChatError(null);
+    setChatMessages((prev) => [...prev, { role: "user", text: q }]);
+    setChatLoading(true);
+    try {
+      const r = await agileAPI.chat(q);
+      setChatMessages((prev) => [...prev, { role: "assistant", text: r.data.answer }]);
+    } catch (err) {
+      const msg = err.response?.data?.detail || err.message || "Chat failed.";
+      setChatError(msg);
+      setChatMessages((prev) => [...prev, { role: "error", text: msg }]);
+    } finally {
+      setChatLoading(false);
     }
   };
 
@@ -387,6 +419,83 @@ export default function AIAnalysis() {
               ))}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ── Chat with codebase ── */}
+      {result && (
+        <div className="bg-white border border-gray-200 rounded-2xl shadow-sm mt-4 overflow-hidden">
+          {/* Chat header */}
+          <div className="flex items-center gap-2 px-5 py-3.5 border-b border-gray-100 bg-gray-50">
+            <MessageSquare className="w-4 h-4 text-orange-500" />
+            <span className="text-sm font-semibold text-gray-800">Chat with your codebase</span>
+            <span className="text-xs text-gray-400 ml-1">— ask anything about the indexed repo</span>
+          </div>
+
+          {/* Messages */}
+          <div className="flex flex-col gap-3 px-5 py-4 max-h-96 overflow-y-auto">
+            {chatMessages.length === 0 && (
+              <div className="text-center py-8 text-gray-400 text-sm">
+                <Bot className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                Ask a question about your repository — the AI will search the indexed code to answer.
+              </div>
+            )}
+            {chatMessages.map((msg, i) => (
+              <div key={i} className={`flex gap-2.5 ${msg.role === "user" ? "flex-row-reverse" : "flex-row"}`}>
+                <div className={`flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-white
+                  ${msg.role === "user" ? "bg-orange-500" : msg.role === "error" ? "bg-red-400" : "bg-gray-700"}`}>
+                  {msg.role === "user"
+                    ? <UserIcon className="w-3.5 h-3.5" />
+                    : msg.role === "error"
+                    ? <AlertTriangle className="w-3.5 h-3.5" />
+                    : <Bot className="w-3.5 h-3.5" />
+                  }
+                </div>
+                <div className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap
+                  ${msg.role === "user"
+                    ? "bg-orange-500 text-white rounded-tr-sm"
+                    : msg.role === "error"
+                    ? "bg-red-50 text-red-700 border border-red-200 rounded-tl-sm"
+                    : "bg-gray-100 text-gray-800 rounded-tl-sm"
+                  }`}>
+                  {msg.text}
+                </div>
+              </div>
+            ))}
+            {chatLoading && (
+              <div className="flex gap-2.5">
+                <div className="flex-shrink-0 w-7 h-7 rounded-full bg-gray-700 flex items-center justify-center">
+                  <Bot className="w-3.5 h-3.5 text-white" />
+                </div>
+                <div className="bg-gray-100 rounded-2xl rounded-tl-sm px-4 py-3 flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                  <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                  <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                </div>
+              </div>
+            )}
+            <div ref={chatBottomRef} />
+          </div>
+
+          {/* Input */}
+          <form onSubmit={handleChat}
+            className="flex items-center gap-2 px-4 py-3 border-t border-gray-100 bg-gray-50">
+            <input
+              className="flex-1 text-sm outline-none bg-white border border-gray-200 rounded-xl px-3 py-2
+                focus:border-orange-400 transition-colors placeholder-gray-400"
+              placeholder="e.g. How is authentication implemented? Where are sprint endpoints?"
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              disabled={chatLoading}
+            />
+            <button
+              type="submit"
+              disabled={chatLoading || !chatInput.trim()}
+              className="flex-shrink-0 w-9 h-9 rounded-xl bg-orange-500 hover:bg-orange-600 disabled:opacity-40
+                disabled:cursor-not-allowed flex items-center justify-center transition-colors">
+              <Send className="w-4 h-4 text-white" />
+            </button>
+          </form>
         </div>
       )}
     </div>

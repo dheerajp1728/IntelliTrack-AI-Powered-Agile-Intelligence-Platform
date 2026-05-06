@@ -134,6 +134,7 @@ export const taskAllocationAPI = {
 export const agileAPI = {
   analyze: (data) => api.post("/ai/analyze", data, { timeout: 200000 }),
   health: () => api.get("/ai/health"),
+  chat: (question) => api.post("/ai/chat", { question }, { timeout: 120000 }),
 };
 
 export default api;

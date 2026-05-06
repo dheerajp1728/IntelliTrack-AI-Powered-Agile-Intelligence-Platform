@@ -1383,6 +1383,10 @@ class AIAnalyzeRequest(PydanticModel):
     tasks: str
 
 
+class AIChatRequest(PydanticModel):
+    question: str
+
+
 def _fetch_repo_code(repo_url: str, token: Optional[str]) -> str:
     """Fetch up to ~6000 chars of code from the repo's source files."""
     import requests as req, base64
@@ -1513,3 +1517,69 @@ Respond ONLY with valid JSON — no extra text, no markdown fences:
 
     percent = max(0, min(100, int(data_parsed.get("overall_progress", 0))))
     return {"results": results, "progress_percent": percent}
+
+
+@app.post("/ai/chat")
+def ai_chat(data: AIChatRequest, current_user: User = Depends(get_current_user_from_request)):
+    from openai import OpenAI as _OpenAI
+    from qdrant_client import QdrantClient
+
+    # 1. Embed the question via OpenAI
+    if not OPENAI_API_KEY:
+        raise HTTPException(status_code=503, detail="OPENAI_API_KEY is not configured.")
+    try:
+        oai = _OpenAI(api_key=OPENAI_API_KEY)
+        embed_resp = oai.embeddings.create(
+            model="text-embedding-3-small",
+            input=data.question,
+        )
+        embedding = embed_resp.data[0].embedding
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"OpenAI embedding failed: {e}")
+
+    # 2. Search Qdrant Cloud for relevant code chunks
+    try:
+        qdrant_url = os.environ.get("QDRANT_URL", "http://localhost:6333")
+        qdrant_api_key = os.environ.get("QDRANT_API_KEY")
+        if qdrant_api_key:
+            qdrant = QdrantClient(url=qdrant_url, api_key=qdrant_api_key)
+        else:
+            qdrant = QdrantClient(url=qdrant_url)
+        hits = qdrant.query_points(
+            collection_name="repo_code",
+            query=embedding,
+            limit=5,
+            with_payload=True,
+            with_vectors=False,
+        ).points
+        code_context = "\n\n---\n\n".join(
+            f"[{h.payload.get('file_path', 'unknown')}]\n{h.payload.get('text', '')}"
+            for h in hits
+        )
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Vector DB (Qdrant) unavailable: {e}")
+
+    if not code_context.strip():
+        raise HTTPException(status_code=404, detail="No indexed code found. Run the Progress Analysis first to index the repository.")
+
+    # 3. Ask the LLM via OpenAI
+    prompt = (
+        "You are a helpful assistant that answers questions about a software project based on its source code.\n\n"
+        "RELEVANT CODE FROM REPOSITORY:\n"
+        f"{code_context[:7000]}\n\n"
+        "USER QUESTION:\n"
+        f"{data.question}\n\n"
+        "Answer concisely and accurately based on the code above. "
+        "If the code doesn't contain enough information to answer, say so clearly."
+    )
+    try:
+        client = _OpenAI(api_key=OPENAI_API_KEY)
+        response = client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2,
+        )
+        answer = response.choices[0].message.content.strip()
+        return {"answer": answer}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"OpenAI chat failed: {e}")
