@@ -1,6 +1,7 @@
 from dotenv import load_dotenv
 load_dotenv()
 
+import os
 from fastapi import FastAPI, Depends, HTTPException, status, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel as PydanticModel
@@ -39,9 +40,15 @@ from .seed import seed_data
 
 app = FastAPI(title="IntelliTract Workspace API")
 
+_raw_origins = os.environ.get(
+    "ALLOWED_ORIGINS",
+    "http://localhost:5173,http://127.0.0.1:5173"
+)
+ALLOWED_ORIGINS = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -1365,10 +1372,10 @@ def admin_reset(db: Session = Depends(get_db)):
     return {"message": "All projects, sprints, and issues have been deleted."}
 
 
-# ── AI Progress Analysis (Ollama-powered, fully local) ───────────────────────
+# ── AI Progress Analysis (OpenAI-powered) ───────────────────────────────────
 
-OLLAMA_BASE = "http://localhost:11434"
-OLLAMA_MODEL = "llama3.2"  # change to any model you have pulled, e.g. mistral, llama3, codellama
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+OPENAI_MODEL = os.environ.get("LLM_MODEL", "gpt-4o-mini")
 
 class AIAnalyzeRequest(PydanticModel):
     repo_url: str
@@ -1426,11 +1433,9 @@ def _fetch_repo_code(repo_url: str, token: Optional[str]) -> str:
 def ai_health():
     """Check whether Ollama is reachable at localhost:11434."""
     import requests as req
-    try:
-        req.get(f"{OLLAMA_BASE}/api/tags", timeout=3)
+    if OPENAI_API_KEY:
         return {"status": "online"}
-    except Exception:
-        return {"status": "offline"}
+    return {"status": "offline - OPENAI_API_KEY not set"}
 
 
 @app.post("/ai/analyze")
@@ -1469,27 +1474,16 @@ Respond ONLY with valid JSON — no extra text, no markdown fences:
 }}"""
 
     try:
-        resp = req.post(
-            f"{OLLAMA_BASE}/api/chat",
-            json={
-                "model": OLLAMA_MODEL,
-                "messages": [{"role": "user", "content": prompt}],
-                "stream": False,
-                "options": {"temperature": 0.1},
-            },
-            timeout=180,
+        from openai import OpenAI as _OpenAI
+        client = _OpenAI(api_key=OPENAI_API_KEY)
+        response = client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,
         )
-        if resp.status_code != 200:
-            raise HTTPException(status_code=502, detail=f"Ollama error {resp.status_code}: {resp.text[:200]}")
-        raw = resp.json()["message"]["content"].strip()
-    except req.exceptions.ConnectionError:
-        raise HTTPException(status_code=503, detail="Ollama is not running. Start it with: ollama serve")
-    except req.exceptions.Timeout:
-        raise HTTPException(status_code=504, detail="Ollama timed out. Try a smaller repo or fewer tasks.")
-    except HTTPException:
-        raise
+        raw = response.choices[0].message.content.strip()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=502, detail=f"OpenAI error: {str(e)}")
 
     # 4. Parse JSON from response (strip any accidental markdown fences)
     raw = re.sub(r"^```[a-z]*\n?", "", raw).rstrip("` \n")

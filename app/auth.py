@@ -6,11 +6,12 @@ import secrets
 from fastapi import Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 
+import os
 from .database import get_db
 from .models import User
 
 # Configuration
-SECRET_KEY = "your-secret-key-change-this-in-production"
+SECRET_KEY = os.environ.get("SECRET_KEY", "your-secret-key-change-this-in-production")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 

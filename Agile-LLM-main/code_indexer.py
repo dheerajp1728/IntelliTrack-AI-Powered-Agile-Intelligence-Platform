@@ -81,7 +81,7 @@ def sync_repo_to_qdrant(repo_url: str, token: Optional[str], qdrant: QdrantIndex
         chunks = chunk_text(file['content'])
         print(f"[DEBUG] File split into {len(chunks)} chunks.")
         for idx, chunk in enumerate(chunks):
-            embedding = lmstudio_embed(chunk)
+            embedding = openai_embed(chunk)
             print(f"[DEBUG] Upserting chunk {idx} of file {file['file_path']} to Qdrant.")
             qdrant.upsert_code_chunks([{
                 "file_path": file['file_path'],
@@ -96,7 +96,7 @@ def get_relevant_code_for_tasks(tasks: List[str], qdrant: QdrantIndexer, top_k=5
     code_blocks = []
     for task in tasks:
         print(f"[DEBUG] Embedding and searching for task: {task}")
-        emb = lmstudio_embed(task)
+        emb = openai_embed(task)
         results = qdrant.search(emb, top_k=top_k)
         print(f"[DEBUG] Found {len(results)} relevant code chunks for task.")
         for r in results:

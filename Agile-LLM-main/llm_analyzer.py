@@ -1,17 +1,14 @@
-import requests
 import json as pyjson
 import re
 import traceback
 import os
-import time
 from typing import List
+from openai import OpenAI
 
 class LLMAnalyzer:
-    def __init__(self, api_url: str = None):
-        self.api_url = api_url or os.environ.get(
-            "LLM_API_URL", "http://localhost:11434/api/chat"
-        )
-        self.model = os.environ.get("LLM_MODEL", "llama3.2")
+    def __init__(self):
+        self.client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+        self.model = os.environ.get("LLM_MODEL", "gpt-4o-mini")
 
     def analyze_tasks_with_summary(self, repo_code: List[str], tasks: List[str]):
         """
@@ -49,34 +46,15 @@ Status values must be: done, in progress, or not started
 Response MUST be valid JSON only.
 """
         
-        payload = {
-            "model": self.model,
-            "messages": [{"role": "user", "content": prompt}],
-            "stream": False,
-            "options": {"temperature": 0.1},
-        }
-
         try:
-            print(f"[DEBUG] Sending analysis request to Ollama at {self.api_url} (model: {self.model}, timeout: 300s)...", flush=True)
-            response = None
-            for attempt in range(3):
-                response = requests.post(self.api_url, json=payload, timeout=300)
-                if response.status_code in (429, 503, 529):
-                    wait = 2 ** attempt
-                    print(f"[WARN] Ollama returned {response.status_code}, retrying in {wait}s (attempt {attempt+1}/3)...", flush=True)
-                    time.sleep(wait)
-                else:
-                    break
-
-            print(f"[DEBUG] Ollama Response Status: {response.status_code}", flush=True)
-
-            if response.status_code != 200:
-                print(f"[ERROR] Ollama API returned {response.status_code}: {response.text[:200]}", flush=True)
-                return self._create_empty_response(tasks)
-
-            result = response.json()
-            content = result.get("message", {}).get("content", "")
-            print(f"[DEBUG] LLM Response received ({len(content)} chars)", flush=True)
+            print(f"[DEBUG] Sending analysis request to OpenAI (model: {self.model})...", flush=True)
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1,
+            )
+            content = response.choices[0].message.content or ""
+            print(f"[DEBUG] OpenAI response received ({len(content)} chars)", flush=True)
             print(f"[DEBUG] Content preview: {content[:200]}", flush=True)
             
             # Extract JSON from response
@@ -142,14 +120,8 @@ Response MUST be valid JSON only.
             
             return summaries, percent
             
-        except requests.exceptions.Timeout:
-            print(f"[ERROR] LLM request timed out after 300s", flush=True)
-            return self._create_empty_response(tasks)
-        except requests.exceptions.ConnectionError:
-            print(f"[ERROR] Cannot connect to LLM at {self.api_url}", flush=True)
-            return self._create_empty_response(tasks)
         except Exception as e:
-            print(f"[ERROR] Unexpected error: {e}", flush=True)
+            print(f"[ERROR] OpenAI API error: {e}", flush=True)
             traceback.print_exc()
             return self._create_empty_response(tasks)
     

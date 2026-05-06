@@ -9,8 +9,13 @@ import warnings
 warnings.filterwarnings("ignore", message=".*Qdrant client version.*")
 
 class QdrantIndexer:
-    def __init__(self, collection_name="repo_code", host="localhost", port=6333, vector_size=768):
-        self.client = QdrantClient(host=host, port=port)
+    def __init__(self, collection_name="repo_code", vector_size=1536):
+        qdrant_url = os.environ.get("QDRANT_URL", "http://localhost:6333")
+        qdrant_api_key = os.environ.get("QDRANT_API_KEY")
+        if qdrant_api_key:
+            self.client = QdrantClient(url=qdrant_url, api_key=qdrant_api_key)
+        else:
+            self.client = QdrantClient(url=qdrant_url)
         self.collection_name = collection_name
         self.vector_size = vector_size
         self._ensure_collection()

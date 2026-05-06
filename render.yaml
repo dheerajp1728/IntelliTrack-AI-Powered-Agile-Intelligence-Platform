@@ -1,0 +1,54 @@
+databases:
+  - name: intellitrack-db
+    plan: free
+    databaseName: intellitrack
+    user: intellitrack
+
+services:
+  # ── 1. Backend API (FastAPI) ────────────────────────────────────────────────
+  - type: web
+    name: intellitrack-backend
+    plan: free
+    runtime: python
+    rootDir: .
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: intellitrack-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ALLOWED_ORIGINS
+        value: https://intellitrack-frontend.onrender.com
+
+  # ── 2. Frontend (React/Vite static site) ───────────────────────────────────
+  - type: web
+    name: intellitrack-frontend
+    plan: free
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_API_URL
+        value: https://intellitrack-backend.onrender.com
+
+  # ── 3. LLM / AI Service (FastAPI) ──────────────────────────────────────────
+  - type: web
+    name: intellitrack-llm
+    plan: free
+    runtime: python
+    rootDir: Agile-LLM-main
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false          # fill in manually in Render dashboard
+      - key: QDRANT_URL
+        sync: false          # fill in manually in Render dashboard
+      - key: QDRANT_API_KEY
+        sync: false          # fill in manually in Render dashboard
+      - key: LLM_MODEL
+        value: gpt-4o-mini
