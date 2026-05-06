@@ -1460,9 +1460,12 @@ def ai_analyze(data: AIAnalyzeRequest, current_user: User = Depends(get_current_
                 timeout=300,
             )
             if resp.status_code == 200:
-                return resp.json()
+                try:
+                    return resp.json()
+                except Exception:
+                    pass  # malformed JSON — fall through to direct analysis
         except Exception:
-            pass  # fall through to direct OpenAI analysis below
+            pass  # LLM service unreachable — fall through to direct analysis
 
     # 2. Fallback: Fetch repo code directly
     code_context = _fetch_repo_code(data.repo_url, data.github_token)
@@ -1550,10 +1553,21 @@ def ai_chat(data: AIChatRequest, current_user: User = Depends(get_current_user_f
             timeout=120,
         )
         if resp.status_code == 200:
-            return resp.json()
-        detail = resp.json().get("detail", resp.text[:200])
+            try:
+                return resp.json()
+            except Exception:
+                raise HTTPException(status_code=502, detail=f"LLM service returned invalid response: {resp.text[:200]}")
+        # Try to extract a JSON detail, fall back to raw text
+        try:
+            detail = resp.json().get("detail", resp.text[:300])
+        except Exception:
+            detail = resp.text[:300] or f"LLM service returned HTTP {resp.status_code}"
         raise HTTPException(status_code=resp.status_code, detail=detail)
     except HTTPException:
         raise
+    except req.exceptions.Timeout:
+        raise HTTPException(status_code=504, detail="LLM service timed out. It may be starting up — please try again in 30 seconds.")
+    except req.exceptions.ConnectionError:
+        raise HTTPException(status_code=503, detail="LLM service is unavailable. It may be starting up — please try again in 30 seconds.")
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"LLM service unavailable: {e}")
+        raise HTTPException(status_code=503, detail=f"LLM service error: {e}")
