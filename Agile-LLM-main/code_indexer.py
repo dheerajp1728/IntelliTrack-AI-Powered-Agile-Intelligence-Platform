@@ -1,9 +1,16 @@
 import requests
 import base64
 import hashlib
+import os
 from typing import List, Dict, Optional
 from qdrant_indexer import QdrantIndexer
-import numpy as np
+
+
+def openai_embed(text: str) -> list:
+    from openai import OpenAI
+    client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+    response = client.embeddings.create(model="text-embedding-3-small", input=text)
+    return response.data[0].embedding
 
 def get_github_files_and_hashes(repo_url: str, token: Optional[str] = None) -> List[Dict]:
     # Returns list of dicts: {file_path, commit_hash, content}
@@ -58,19 +65,6 @@ def chunk_text(text: str, chunk_size: int = 300, overlap: int = 50) -> List[str]
         i += chunk_size - overlap
     return chunks
 
-
-def lmstudio_embed(text: str, model: str = "text-embedding-nomic-embed-text-v1.5") -> list:
-    import requests
-    print(f"[DEBUG] Embedding text (first 80 chars): {text[:80].replace('\n',' ')} ...")
-    payload = {
-        "model": model,
-        "input": [text]
-    }
-    response = requests.post("http://127.0.0.1:1234/v1/embeddings", json=payload, timeout=30)
-    response.raise_for_status()
-    emb = response.json()["data"][0]["embedding"]
-    print(f"[DEBUG] Got embedding of length {len(emb)}")
-    return emb
 
 def sync_repo_to_qdrant(repo_url: str, token: Optional[str], qdrant: QdrantIndexer):
     print(f"[DEBUG] Fetching files and hashes from repo: {repo_url}")
