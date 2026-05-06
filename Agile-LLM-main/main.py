@@ -18,6 +18,10 @@ class ProgressRequest(BaseModel):
     github_token: Optional[str] = None
     tasks: str
 
+
+class ChatRequest(BaseModel):
+    question: str
+
 class TaskProgress(BaseModel):
     task: str
     progress: str
@@ -152,5 +156,64 @@ def get_progress(data: ProgressRequest):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/chat")
+def chat(data: ChatRequest):
+    """Answer a question about the indexed codebase using Qdrant + OpenAI."""
+    from code_indexer import openai_embed
+    import os
+
+    # 1. Embed the question
+    try:
+        embedding = openai_embed(data.question)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Embedding failed: {e}")
+
+    # 2. Search Qdrant for relevant code chunks
+    try:
+        qdrant = QdrantIndexer()
+        hits = qdrant.search(embedding, top_k=5)
+        code_context = "\n\n---\n\n".join(
+            f"[{h.payload.get('file_path', 'unknown')}]\n{h.payload.get('text', '')}"
+            for h in hits
+        )
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Vector DB (Qdrant) unavailable: {e}")
+
+    if not code_context.strip():
+        raise HTTPException(
+            status_code=404,
+            detail="No indexed code found. Run the Progress Analysis first to index the repository.",
+        )
+
+    # 3. Ask OpenAI
+    openai_api_key = os.environ.get("OPENAI_API_KEY", "")
+    llm_model = os.environ.get("LLM_MODEL", "gpt-4o-mini")
+    if not openai_api_key:
+        raise HTTPException(status_code=503, detail="OPENAI_API_KEY is not configured.")
+
+    prompt = (
+        "You are a helpful assistant that answers questions about a software project based on its source code.\n\n"
+        "RELEVANT CODE FROM REPOSITORY:\n"
+        f"{code_context[:7000]}\n\n"
+        "USER QUESTION:\n"
+        f"{data.question}\n\n"
+        "Answer concisely and accurately based on the code above. "
+        "If the code doesn't contain enough information to answer, say so clearly."
+    )
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=openai_api_key)
+        response = client.chat.completions.create(
+            model=llm_model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2,
+        )
+        answer = response.choices[0].message.content.strip()
+        return {"answer": answer}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"OpenAI chat failed: {e}")
+
 
 # To run: uvicorn main:app --reload
