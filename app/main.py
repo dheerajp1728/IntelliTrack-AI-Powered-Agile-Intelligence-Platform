@@ -1376,6 +1376,7 @@ def admin_reset(db: Session = Depends(get_db)):
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.environ.get("LLM_MODEL", "gpt-4o-mini")
+LLM_SERVICE_URL = os.environ.get("LLM_SERVICE_URL", "")
 
 class AIAnalyzeRequest(PydanticModel):
     repo_url: str
@@ -1446,18 +1447,35 @@ def ai_health():
 def ai_analyze(data: AIAnalyzeRequest, current_user: User = Depends(get_current_user_from_request)):
     import requests as req, json as _json, re
 
-    # 1. Fetch repo code
+    # 1. Try LLM microservice first (also populates Qdrant for /ai/chat)
+    if LLM_SERVICE_URL:
+        try:
+            resp = req.post(
+                f"{LLM_SERVICE_URL.rstrip('/')}/progress",
+                json={
+                    "repo_url": data.repo_url,
+                    "github_token": data.github_token,
+                    "tasks": data.tasks,
+                },
+                timeout=300,
+            )
+            if resp.status_code == 200:
+                return resp.json()
+        except Exception:
+            pass  # fall through to direct OpenAI analysis below
+
+    # 2. Fallback: Fetch repo code directly
     code_context = _fetch_repo_code(data.repo_url, data.github_token)
     if not code_context:
         code_context = "(Could not fetch repository code — check the URL)"
 
-    # 2. Build task list
+    # 3. Build task list
     tasks = [t.strip() for t in data.tasks.replace(";", "\n").splitlines() if t.strip()]
     if not tasks:
         raise HTTPException(status_code=400, detail="No tasks provided.")
     task_list = "\n".join(f"{i+1}. {t}" for i, t in enumerate(tasks))
 
-    # 3. Call Ollama
+    # 4. Call OpenAI
     prompt = f"""You are a software project analyst. Given the repository code below and a list of sprint tasks, determine the implementation status of each task.
 
 REPOSITORY CODE:
