@@ -31,10 +31,6 @@ COPY docker/nginx.conf /etc/nginx/nginx.conf
 # Copy built application from builder
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# Create non-root user
-RUN addgroup -g 1000 nginx_user && adduser -D -u 1000 -G nginx_user nginx_user
-USER nginx_user
-
 EXPOSE 80
 
 # Health check
