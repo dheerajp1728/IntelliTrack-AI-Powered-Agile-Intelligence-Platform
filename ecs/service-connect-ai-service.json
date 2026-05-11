@@ -1,0 +1,16 @@
+{
+  "enabled": true,
+  "namespace": "intellitrack.local",
+  "services": [
+    {
+      "portName": "ai-service",
+      "discoveryName": "intellitrack-ai-service",
+      "clientAliases": [
+        {
+          "port": 8004,
+          "dnsName": "intellitrack-ai-service"
+        }
+      ]
+    }
+  ]
+}
