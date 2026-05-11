@@ -1,0 +1,26 @@
+version: 0.2
+
+phases:
+  pre_build:
+    commands:
+      - echo Logging in to Amazon ECR...
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+      - IMAGE_TAG=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c1-7)
+      - IMAGE_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/intellitrack-ai-service
+
+  build:
+    commands:
+      - echo Building AI service Docker image...
+      - docker build -f docker/Dockerfile.ai-service -t $IMAGE_URI:latest -t $IMAGE_URI:$IMAGE_TAG .
+
+  post_build:
+    commands:
+      - echo Pushing AI service image to ECR...
+      - docker push $IMAGE_URI:latest
+      - docker push $IMAGE_URI:$IMAGE_TAG
+      - echo Build complete. Image $IMAGE_URI:$IMAGE_TAG pushed.
+      - printf '[{"name":"ai-service","imageUri":"%s"}]' "$IMAGE_URI:$IMAGE_TAG" > imagedefinitions.json
+
+artifacts:
+  files:
+    - imagedefinitions.json
