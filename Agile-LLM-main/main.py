@@ -13,6 +13,12 @@ import os
 
 app = FastAPI()
 
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
 class ProgressRequest(BaseModel):
     repo_url: str
     github_token: Optional[str] = None
