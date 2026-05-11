@@ -7,13 +7,9 @@ phases:
       - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
       - IMAGE_TAG=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c1-7)
       - IMAGE_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/intellitrack-frontend
-      - cd frontend && npm install
 
   build:
     commands:
-      - echo Building frontend...
-      - cd frontend && npm run build
-      - cd ..
       - echo Building frontend Docker image...
       - docker build -f docker/Dockerfile.frontend -t $IMAGE_URI:latest -t $IMAGE_URI:$IMAGE_TAG .
 
