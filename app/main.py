@@ -1540,34 +1540,106 @@ Respond ONLY with valid JSON — no extra text, no markdown fences:
     return {"results": results, "progress_percent": percent}
 
 
+def _chat_via_qdrant_openai(question: str) -> dict:
+    """Direct fallback: embed question → search Qdrant → ask OpenAI with code context."""
+    from openai import OpenAI as _OpenAI
+    from qdrant_client import QdrantClient
+
+    qdrant_url = os.environ.get("QDRANT_URL", "")
+    qdrant_api_key = os.environ.get("QDRANT_API_KEY", "")
+    openai_api_key = OPENAI_API_KEY
+    llm_model = OPENAI_MODEL
+
+    if not openai_api_key:
+        raise HTTPException(status_code=503, detail="OPENAI_API_KEY is not configured.")
+    if not qdrant_url:
+        raise HTTPException(status_code=503, detail="QDRANT_URL is not configured.")
+
+    client = _OpenAI(api_key=openai_api_key)
+
+    # 1. Embed the question
+    embed_resp = client.embeddings.create(model="text-embedding-ada-002", input=question)
+    embedding = embed_resp.data[0].embedding
+
+    # 2. Search Qdrant for relevant code chunks
+    if qdrant_api_key:
+        qclient = QdrantClient(url=qdrant_url, api_key=qdrant_api_key)
+    else:
+        qclient = QdrantClient(url=qdrant_url)
+
+    hits = qclient.query_points(
+        collection_name="repo_code",
+        query=embedding,
+        limit=5,
+        with_payload=True,
+        with_vectors=False,
+    ).points
+
+    if not hits:
+        raise HTTPException(
+            status_code=404,
+            detail="No indexed code found. Please run the Progress Analysis first to index your repository.",
+        )
+
+    code_context = "\n\n---\n\n".join(
+        f"[{h.payload.get('file_path', 'unknown')}]\n{h.payload.get('text', '')}"
+        for h in hits
+    )
+
+    # 3. Ask OpenAI with code context
+    prompt = (
+        "You are a helpful assistant that answers questions about a software project based on its source code.\n\n"
+        "RELEVANT CODE FROM REPOSITORY:\n"
+        f"{code_context[:7000]}\n\n"
+        "USER QUESTION:\n"
+        f"{question}\n\n"
+        "Answer concisely and accurately based on the code above. "
+        "If the code doesn't contain enough information to answer, say so clearly."
+    )
+    response = client.chat.completions.create(
+        model=llm_model,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.2,
+    )
+    return {"answer": response.choices[0].message.content.strip()}
+
+
 @app.post("/ai/chat")
 def ai_chat(data: AIChatRequest, current_user: User = Depends(get_current_user_from_request)):
     import requests as req
 
-    if not LLM_SERVICE_URL:
-        raise HTTPException(status_code=503, detail="LLM_SERVICE_URL is not configured.")
-    try:
-        resp = req.post(
-            f"{LLM_SERVICE_URL.rstrip('/')}/chat",
-            json={"question": data.question},
-            timeout=120,
-        )
-        if resp.status_code == 200:
-            try:
-                return resp.json()
-            except Exception:
-                raise HTTPException(status_code=502, detail=f"LLM service returned invalid response: {resp.text[:200]}")
-        # Try to extract a JSON detail, fall back to raw text
+    # 1. Try LLM microservice first
+    if LLM_SERVICE_URL:
         try:
-            detail = resp.json().get("detail", resp.text[:300])
+            resp = req.post(
+                f"{LLM_SERVICE_URL.rstrip('/')}/chat",
+                json={"question": data.question},
+                timeout=120,
+            )
+            if resp.status_code == 200:
+                try:
+                    return resp.json()
+                except Exception:
+                    pass  # fall through to direct fallback
+            elif resp.status_code not in (503, 504):
+                # Propagate real errors (e.g. 404 "no indexed code")
+                try:
+                    detail = resp.json().get("detail", resp.text[:300])
+                except Exception:
+                    detail = resp.text[:300] or f"LLM service returned HTTP {resp.status_code}"
+                raise HTTPException(status_code=resp.status_code, detail=detail)
+            # 503/504 from LLM service → fall through to direct fallback
+        except HTTPException:
+            raise
+        except (req.exceptions.Timeout, req.exceptions.ConnectionError):
+            pass  # LLM service unreachable → fall through to direct fallback
         except Exception:
-            detail = resp.text[:300] or f"LLM service returned HTTP {resp.status_code}"
-        raise HTTPException(status_code=resp.status_code, detail=detail)
+            pass  # unexpected error → fall through
+
+    # 2. Fallback: call Qdrant + OpenAI directly
+    try:
+        return _chat_via_qdrant_openai(data.question)
     except HTTPException:
         raise
-    except req.exceptions.Timeout:
-        raise HTTPException(status_code=504, detail="LLM service timed out. It may be starting up — please try again in 30 seconds.")
-    except req.exceptions.ConnectionError:
-        raise HTTPException(status_code=503, detail="LLM service is unavailable. It may be starting up — please try again in 30 seconds.")
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"LLM service error: {e}")
+        raise HTTPException(status_code=503, detail=f"Chat service error: {e}")
