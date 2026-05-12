@@ -11,9 +11,14 @@ from .database import get_db
 from .models import User
 
 # Configuration
-SECRET_KEY = os.environ.get("SECRET_KEY", "your-secret-key-change-this-in-production")
+SECRET_KEY = os.environ.get("SECRET_KEY", "")
+if not SECRET_KEY:
+    raise RuntimeError(
+        "SECRET_KEY environment variable is not set. "
+        "Set it via AWS Secrets Manager or environment config before starting the application."
+    )
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
 
 def hash_password(password: str) -> str:
