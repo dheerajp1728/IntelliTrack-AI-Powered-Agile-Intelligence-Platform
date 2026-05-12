@@ -1,5 +1,5 @@
 from sqlalchemy import (
-    Column, Integer, String, ForeignKey, Text, Boolean, DateTime
+    Column, Integer, String, ForeignKey, Text, Boolean, DateTime, Index
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -178,6 +178,14 @@ class Issue(Base):
     notifications = relationship("Notification", cascade="all, delete-orphan", foreign_keys="Notification.issue_id")
     sub_tasks = relationship("Issue", foreign_keys="Issue.parent_id", back_populates="parent", uselist=True)
     parent = relationship("Issue", foreign_keys="Issue.parent_id", back_populates="sub_tasks", remote_side="[Issue.id]", uselist=False)
+
+    __table_args__ = (
+        Index("ix_issues_project_id", "project_id"),
+        Index("ix_issues_sprint_id", "sprint_id"),
+        Index("ix_issues_assignee_id", "assignee_id"),
+        Index("ix_issues_status", "status"),
+        Index("ix_issues_project_sprint", "project_id", "sprint_id"),
+    )
     child_stories = relationship("Issue", foreign_keys="Issue.epic_id", back_populates="epic_issue", uselist=True)
     epic_issue = relationship("Issue", foreign_keys="Issue.epic_id", back_populates="child_stories", remote_side="[Issue.id]", uselist=False)
 

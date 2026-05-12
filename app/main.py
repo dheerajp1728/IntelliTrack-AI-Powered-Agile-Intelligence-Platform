@@ -99,6 +99,23 @@ def _run_migrations():
         except Exception:
             pass  # Column already exists
 
+        # Add performance indexes on issues table (CREATE INDEX IF NOT EXISTS is idempotent)
+        indexes = [
+            "CREATE INDEX IF NOT EXISTS ix_issues_project_id ON issues (project_id)",
+            "CREATE INDEX IF NOT EXISTS ix_issues_sprint_id ON issues (sprint_id)",
+            "CREATE INDEX IF NOT EXISTS ix_issues_assignee_id ON issues (assignee_id)",
+            "CREATE INDEX IF NOT EXISTS ix_issues_status ON issues (status)",
+            "CREATE INDEX IF NOT EXISTS ix_issues_project_sprint ON issues (project_id, sprint_id)",
+            "CREATE INDEX IF NOT EXISTS ix_notifications_user_id ON notifications (user_id)",
+            "CREATE INDEX IF NOT EXISTS ix_activity_log_issue_id ON activity_log (issue_id)",
+        ]
+        for sql in indexes:
+            try:
+                conn.execute(text(sql))
+                conn.commit()
+            except Exception:
+                pass  # Index may already exist or table not ready
+
 _run_migrations()
 
 
