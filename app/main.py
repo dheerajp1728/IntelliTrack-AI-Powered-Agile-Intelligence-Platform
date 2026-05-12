@@ -128,18 +128,18 @@ async def get_me(current_user: User = Depends(get_current_user_from_request)):
 
 
 @app.post("/auth/change-password")
-def change_password(data: dict, db: Session = Depends(get_db)):
-    user_id = data.get("user_id")
+def change_password(
+    data: dict,
+    current_user: User = Depends(get_current_user_from_request),
+    db: Session = Depends(get_db),
+):
     current_pw = data.get("current_password")
     new_pw = data.get("new_password")
-    if not user_id or not current_pw or not new_pw:
+    if not current_pw or not new_pw:
         raise HTTPException(status_code=400, detail="Missing required fields")
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    if not verify_password(current_pw, user.password_hash):
+    if not verify_password(current_pw, current_user.password_hash):
         raise HTTPException(status_code=400, detail="Current password is incorrect")
-    user.password_hash = hash_password(new_pw)
+    current_user.password_hash = hash_password(new_pw)
     db.commit()
     return {"message": "Password updated successfully"}
 
@@ -1514,11 +1514,11 @@ Respond ONLY with valid JSON — no extra text, no markdown fences:
     raw = re.sub(r"^```[a-z]*\n?", "", raw).rstrip("` \n")
     match = re.search(r"\{[\s\S]*\}", raw)
     if not match:
-        raise HTTPException(status_code=502, detail="Could not parse Ollama response as JSON.")
+        raise HTTPException(status_code=502, detail="Could not parse OpenAI response as JSON.")
     try:
         data_parsed = _json.loads(match.group(0))
     except _json.JSONDecodeError:
-        raise HTTPException(status_code=502, detail="Ollama returned malformed JSON.")
+        raise HTTPException(status_code=502, detail="OpenAI returned malformed JSON.")
 
     response_tasks = data_parsed.get("tasks", [])
     results = []

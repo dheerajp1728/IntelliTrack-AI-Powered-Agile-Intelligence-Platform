@@ -437,7 +437,6 @@ function SecuritySettings() {
     setPwStatus("saving");
     try {
       await authAPI.changePassword({
-        user_id: user?.user_id || user?.id,
         current_password: pwForm.current,
         new_password: pwForm.new,
       });

@@ -29,7 +29,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         salt, pwd_hash = hashed_password.split('$')
         pwd_check = hashlib.pbkdf2_hmac('sha256', plain_password.encode(), salt.encode(), 100000)
         return pwd_check.hex() == pwd_hash
-    except:
+    except (ValueError, AttributeError):
         return False
 
 

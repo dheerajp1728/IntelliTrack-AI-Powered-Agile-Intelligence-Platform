@@ -22,7 +22,9 @@ phases:
       - printf '[{"name":"backend","imageUri":"%s"}]' "$IMAGE_URI:$IMAGE_TAG" > imagedefinitions.json
       - echo Deploying to ECS...
       - aws ecs update-service --cluster intellitrack --service intellitrack-backend --force-new-deployment --region $AWS_DEFAULT_REGION
-      - echo ECS deployment triggered.
+      - echo Waiting for ECS deployment to stabilize...
+      - aws ecs wait services-stable --cluster intellitrack --services intellitrack-backend --region $AWS_DEFAULT_REGION
+      - echo ECS deployment complete.
 
 artifacts:
   files:
