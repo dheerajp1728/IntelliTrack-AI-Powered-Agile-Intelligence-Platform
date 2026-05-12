@@ -2,13 +2,18 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import os
-from fastapi import FastAPI, Depends, HTTPException, status, Query
+from fastapi import FastAPI, Depends, HTTPException, status, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
 from pydantic import BaseModel as PydanticModel
 from datetime import timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, func
 from typing import List, Optional
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from .database import Base, engine, get_db
 from .models import (
     User, DeveloperProfile, Task, Project, Sprint, Issue,
@@ -39,6 +44,30 @@ from .auth import (
 from .seed import seed_data
 
 app = FastAPI(title="IntelliTract Workspace API")
+
+# ── Rate limiter (uses real client IP from X-Forwarded-For behind ALB) ────────
+def _get_client_ip(request: Request) -> str:
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+limiter = Limiter(key_func=_get_client_ip)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# ── Security response headers ─────────────────────────────────────────────────
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next) -> Response:
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+        return response
+
+app.add_middleware(SecurityHeadersMiddleware)
 
 _raw_origins = os.environ.get(
     "ALLOWED_ORIGINS",
@@ -81,7 +110,8 @@ def root():
 # ── Auth ─────────────────────────────────────────────────────────────────────
 
 @app.post("/auth/register", response_model=Token)
-def register(user_data: UserRegister, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+def register(request: Request, user_data: UserRegister, db: Session = Depends(get_db)):
     existing = db.query(User).filter(User.email == user_data.email).first()
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -110,7 +140,8 @@ def register(user_data: UserRegister, db: Session = Depends(get_db)):
 
 
 @app.post("/auth/login", response_model=Token)
-def login(user_data: UserLogin, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def login(request: Request, user_data: UserLogin, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == user_data.email).first()
     if not user or not verify_password(user_data.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid email or password")
@@ -147,12 +178,19 @@ def change_password(
 # ── Users ────────────────────────────────────────────────────────────────────
 
 @app.get("/users", response_model=List[UserResponse])
-def get_users(db: Session = Depends(get_db)):
+def get_users(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user_from_request),
+):
     return db.query(User).all()
 
 
 @app.get("/users/{user_id}", response_model=UserResponse)
-def get_user(user_id: int, db: Session = Depends(get_db)):
+def get_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user_from_request),
+):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -160,7 +198,16 @@ def get_user(user_id: int, db: Session = Depends(get_db)):
 
 
 @app.put("/users/{user_id}", response_model=UserResponse)
-def update_user(user_id: int, data: dict, db: Session = Depends(get_db)):
+def update_user(
+    user_id: int,
+    data: dict,
+    current_user: User = Depends(get_current_user_from_request),
+    db: Session = Depends(get_db),
+):
+    # Users can update their own record; admins can update any
+    allowed_roles = {"admin", "workspace admin"}
+    if current_user.id != user_id and current_user.role.lower() not in allowed_roles:
+        raise HTTPException(status_code=403, detail="Cannot update another user's account")
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -173,7 +220,14 @@ def update_user(user_id: int, data: dict, db: Session = Depends(get_db)):
 
 
 @app.delete("/users/{user_id}")
-def delete_user(user_id: int, db: Session = Depends(get_db)):
+def delete_user(
+    user_id: int,
+    current_user: User = Depends(get_current_user_from_request),
+    db: Session = Depends(get_db),
+):
+    allowed_roles = {"admin", "workspace admin"}
+    if current_user.role.lower() not in allowed_roles:
+        raise HTTPException(status_code=403, detail="Only admins can delete users")
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -193,7 +247,14 @@ def delete_user(user_id: int, db: Session = Depends(get_db)):
 
 
 @app.post("/users", response_model=UserResponse)
-def create_user(user: UserCreate, db: Session = Depends(get_db)):
+def create_user(
+    user: UserCreate,
+    current_user: User = Depends(get_current_user_from_request),
+    db: Session = Depends(get_db),
+):
+    allowed_roles = {"admin", "workspace admin"}
+    if current_user.role.lower() not in allowed_roles:
+        raise HTTPException(status_code=403, detail="Only admins can create users directly")
     existing = db.query(User).filter(User.email == user.email).first()
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -209,7 +270,10 @@ def create_user(user: UserCreate, db: Session = Depends(get_db)):
 # ── Profiles ─────────────────────────────────────────────────────────────────
 
 @app.get("/profiles", response_model=List[ProfileResponse])
-def get_profiles(db: Session = Depends(get_db)):
+def get_profiles(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user_from_request),
+):
     return db.query(DeveloperProfile).all()
 
 
@@ -553,23 +617,40 @@ def get_activity(issue_id: int, db: Session = Depends(get_db)):
 # ── Notifications ─────────────────────────────────────────────────────────────
 
 @app.get("/notifications/{user_id}", response_model=List[NotificationResponse])
-def get_notifications(user_id: int, db: Session = Depends(get_db)):
+def get_notifications(
+    user_id: int,
+    current_user: User = Depends(get_current_user_from_request),
+    db: Session = Depends(get_db),
+):
+    # Users can only fetch their own notifications
+    if current_user.id != user_id and current_user.role.lower() not in {"admin", "workspace admin"}:
+        raise HTTPException(status_code=403, detail="Cannot access another user's notifications")
     return db.query(Notification).filter(
         Notification.user_id == user_id
     ).order_by(Notification.created_at.desc()).limit(50).all()
 
 
 @app.post("/notifications/{notif_id}/read")
-def mark_notification_read(notif_id: int, db: Session = Depends(get_db)):
+def mark_notification_read(
+    notif_id: int,
+    current_user: User = Depends(get_current_user_from_request),
+    db: Session = Depends(get_db),
+):
     notif = db.query(Notification).filter(Notification.id == notif_id).first()
-    if notif:
+    if notif and notif.user_id == current_user.id:
         notif.read = True
         db.commit()
     return {"message": "Marked as read"}
 
 
 @app.post("/notifications/read-all/{user_id}")
-def mark_all_read(user_id: int, db: Session = Depends(get_db)):
+def mark_all_read(
+    user_id: int,
+    current_user: User = Depends(get_current_user_from_request),
+    db: Session = Depends(get_db),
+):
+    if current_user.id != user_id and current_user.role.lower() not in {"admin", "workspace admin"}:
+        raise HTTPException(status_code=403, detail="Cannot update another user's notifications")
     db.query(Notification).filter(
         Notification.user_id == user_id, Notification.read == False
     ).update({"read": True})
