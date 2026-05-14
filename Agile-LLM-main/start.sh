@@ -86,7 +86,7 @@ if kill -0 $SERVER_PID 2>/dev/null; then
     echo "API is available at: http://127.0.0.1:8004"
     echo ""
     echo "Next steps:"
-    echo "  1. Run tests: python test_api.py"
+    echo "  1. Run tests: python test_scripts/test_api.py"
     echo "  2. Make requests: curl -X POST http://127.0.0.1:8004/progress ..."
     echo "  3. View API docs: http://127.0.0.1:8004/docs"
     echo ""

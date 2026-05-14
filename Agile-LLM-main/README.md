@@ -77,7 +77,7 @@ curl -X POST "http://127.0.0.1:8004/progress" \
 Or run the comprehensive test suite:
 
 ```bash
-python test_api.py
+python test_scripts/test_api.py
 ```
 
 ## API Usage
@@ -176,7 +176,8 @@ Agile\ Tracker/
 ├── code_indexer.py         # Repository code fetching and embedding
 ├── llm_analyzer.py         # LLM-based progress analysis
 ├── repo_code_fetcher.py    # GitHub API interactions
-├── test_api.py             # Comprehensive test suite
+├── test_scripts/
+│   └── test_api.py         # Comprehensive test suite
 ├── example_usage.py        # Usage patterns and examples
 ├── start.sh                # Automated startup script
 ├── requirements.txt        # Python dependencies
@@ -298,7 +299,7 @@ The system correctly uses 768-dimensional vectors matching the Nomic embedding m
 ### Run the Full Test Suite
 
 ```bash
-python test_api.py
+python test_scripts/test_api.py
 ```
 
 This verifies:
@@ -431,7 +432,7 @@ This project integrates:
 For issues or questions:
 1. Check the Troubleshooting section above
 2. Review server logs for detailed error messages
-3. Run `test_api.py` to diagnose service connectivity
+3. Run `test_scripts/test_api.py` to diagnose service connectivity
 4. Check that all three services (GitHub API, Qdrant, LM Studio) are accessible
 
 ## Changelog
