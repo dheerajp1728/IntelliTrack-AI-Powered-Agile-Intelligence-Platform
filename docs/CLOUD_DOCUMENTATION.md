@@ -1,233 +1,125 @@
-# IntelliTrack Cloud Implementation Documentation
-
-This document explains how IntelliTrack is implemented on AWS in production, including the actual infrastructure components, deployment flow, service-to-service communication, reliability setup, and operational validation.
-
-## 1. Cloud Implementation Summary
-
-IntelliTrack runs as a cloud-native microservices platform on AWS with three runtime services:
-
-- Frontend service (React plus Nginx)
-- Backend API service (FastAPI)
-- AI analysis service (FastAPI plus vector retrieval path)
-
-Core implementation choices:
-
-- Runtime compute: ECS Fargate
-- Database: Amazon RDS for PostgreSQL (private, Multi-AZ)
-- Networking entry point: Application Load Balancer
-- Image registry: Amazon ECR
-- Secret storage: AWS Secrets Manager
-- Operational logs: Amazon CloudWatch Logs
-- Infrastructure provisioning: Terraform
-- Build and image publishing: AWS CodeBuild buildspecs
-
-## 2. End-to-End Cloud Architecture
+# IntelliTrack Cloud Documentation
 
-Traffic and service flow:
+## 1. Purpose
 
-1. User requests reach the public Application Load Balancer.
-2. ALB forwards API traffic to backend tasks running on ECS Fargate.
-3. Backend accesses RDS PostgreSQL in private subnets.
-4. Backend calls the AI microservice through internal service discovery.
-5. AI service handles analysis and model integration workflows.
-6. Logs from backend and AI tasks stream to CloudWatch log groups.
-7. Container images are delivered from ECR, built through CI pipeline buildspecs.
+This document describes the AWS deployment model used by IntelliTrack, including build, release, runtime connectivity, and operations checks.
 
-## 3. Infrastructure Implemented with Terraform
+## 2. Runtime Architecture (AWS)
 
-The Terraform stack in terraform/main.tf provisions these components.
+Primary runtime services:
 
-### 3.1 Network and Availability
+- frontend container (Nginx + built Vite app)
+- backend container (FastAPI)
+- AI service container (FastAPI)
 
-- Dedicated VPC with CIDR 10.0.0.0/16
-- 2 public subnets across 2 availability zones
-- 2 private subnets across 2 availability zones
-- Internet Gateway for public traffic
-- 2 NAT Gateways (one per AZ) for private subnet outbound access
-- Public and private route tables with explicit associations
+Primary AWS services:
 
-### 3.2 Security Groups and Traffic Rules
+- Amazon ECS Fargate (service runtime)
+- Amazon ECR (container registry)
+- AWS CodeBuild (build and deploy trigger)
+- Application Load Balancer (public entry)
+- Amazon RDS PostgreSQL (persistent relational data)
+- AWS Secrets Manager (runtime secrets)
+- Amazon CloudWatch Logs (service logs)
+- Service Connect / Cloud Map namespace: `intellitrack.local`
 
-- ALB security group:
-   - Inbound 80 and 443 from 0.0.0.0/0
-- ECS security group:
-   - Inbound 8000-8004 only from ALB security group
-   - Inbound 6333 from VPC CIDR for vector service access path
-- RDS security group:
-   - Inbound 5432 only from ECS security group
+## 3. Build and Deploy Pipeline
 
-This design enforces least-exposure between internet, app runtime, and data layer.
+Repository buildspec files:
 
-### 3.3 Database Layer
+- `buildspec/buildspec-backend.yml`
+- `buildspec/buildspec-frontend.yml`
+- `buildspec/buildspec-ai-service.yml`
 
-- Engine: PostgreSQL 15.3
-- DB name: intellitrack
-- Storage: gp3, configurable size (default 20 GB)
-- Availability: Multi-AZ enabled
-- Public access: disabled
-- Backup retention: 7 days
-- CloudWatch PostgreSQL logs export enabled
-- Final snapshot enabled on deletion
+Pipeline pattern per service:
 
-### 3.4 Secrets and Credentials
+1. login to ECR
+2. build Docker image using service Dockerfile
+3. push `latest` and short-commit-tag image
+4. force new ECS deployment
+5. wait for service stability
 
-- Terraform creates a random database password.
-- DATABASE_URL is stored in Secrets Manager under intellitrack/database-url.
-- Runtime task definitions also consume secrets for:
-   - database URL
-   - JWT secret
-   - OpenAI key
-   - Qdrant URL and API key
+CodeBuild project definitions are tracked in:
 
-### 3.5 Registry, Load Balancer, and Logs
+- `update-backend.json`
+- `update-frontend.json`
+- `update-ai-service.json`
 
-- Three ECR repositories with image scan-on-push enabled:
-   - intellitrack-backend
-   - intellitrack-frontend
-   - intellitrack-ai-service
-- ALB plus backend target group:
-   - Target type ip
-   - Health check path /docs
-- CloudWatch log groups:
-   - /ecs/intellitrack-backend
-   - /ecs/intellitrack-ai-service
-   - 30-day log retention
+## 4. Containerization
 
-## 4. ECS Runtime Configuration
+Container definitions:
 
-### 4.1 Backend Task Definition
+- `docker/Dockerfile.backend`
+- `docker/Dockerfile.frontend`
+- `docker/Dockerfile.ai-service`
 
-- Family: intellitrack-backend
-- Fargate CPU and memory: 512 CPU, 1024 MB
-- Port mapping: 8000
-- Health check: /health endpoint every 30s
-- Environment includes LLM model and internal AI service URL
-- Uses Secrets Manager for sensitive values
-- Logs to CloudWatch /ecs/intellitrack-backend
+Notable hardening choices:
 
-### 4.2 AI Service Task Definition
+- non-root users in backend and AI images
+- explicit health checks in all three Dockerfiles
+- minimal base images (`python:3.11-slim`, `node:20-alpine`, `nginx:alpine`)
 
-- Family: intellitrack-ai-service
-- Fargate CPU and memory: 2048 CPU, 4096 MB
-- Port mapping: 8004
-- Health check: /health endpoint
-- Secret injection for Qdrant API key
-- Logs to CloudWatch /ecs/intellitrack-ai-service
+## 5. Service Connectivity
 
-### 4.3 Service Discovery and Internal Calls
+Service Connect settings:
 
-Service Connect configuration is implemented for internal service name resolution under:
+- `ecs/service-connect-backend.json`
+- `ecs/service-connect-ai-service.json`
 
-- Namespace: intellitrack.local
-- AI service discovery name: intellitrack-ai-service
-- Client alias DNS name: intellitrack-ai-service on port 8004
+Namespace:
 
-This supports resilient backend-to-AI internal communication without hardcoded IP dependencies.
+- `intellitrack.local`
 
-## 5. CI and Deployment Implementation
+Purpose:
 
-### 5.1 Automated Build and Publish
+- stable internal service discovery
+- reduced dependency on hardcoded private IP routing
 
-The buildspec files implement per-service image workflows:
+## 6. Operational Verification Checklist
 
-- buildspec/buildspec-backend.yml
-- buildspec/buildspec-frontend.yml
-- buildspec/buildspec-ai-service.yml
+After deployment, verify:
 
-Pipeline behavior:
+1. ECS service `desired == running` for all services
+2. ECS deployment status is stable
+3. ALB targets are healthy
+4. backend API responds (`/` and auth endpoints)
+5. AI service health endpoint responds (`/health`)
+6. CloudWatch logs have no startup/secret failures
 
-1. Login to ECR.
-2. Build Docker image.
-3. Tag latest and short commit hash.
-4. Push both tags.
-5. Emit imagedefinitions.json for deployment stages.
+## 7. Performance Baseline
 
-### 5.2 Deployment Script Flow
+Observed project baseline:
 
-scripts/deploy.sh performs:
+- stable behavior under 25 concurrent users
+- p95 latency in tested scenario around 497 ms
+- login route throttling is intentional for abuse protection
 
-1. Prerequisite validation (AWS CLI, Docker, Terraform)
-2. AWS credential validation
-3. ECR repository creation if missing
-4. Docker build and push for backend, frontend, AI service
-5. Terraform init, plan, apply
-6. Output capture (ALB DNS, RDS endpoint, IDs)
-7. deployment-info.txt generation with next actions
+Load test script:
 
-## 6. Production Operations and Reliability
+- `test_scripts/load_test_p95.py`
 
-Implemented reliability controls:
+## 8. Environment and Secrets
 
-- Multi-AZ database deployment
-- Health checks at container and ALB layers
-- Isolated microservices to limit blast radius
-- CloudWatch log centralization for faster diagnosis
-- Deployment output capture for deterministic post-deploy validation
+Runtime variables are injected through environment configuration and AWS secret management.
 
-Presentation-level reliability evidence captured in project artifacts:
+Critical variables include:
 
-- Stable behavior up to 25 concurrent users
-- p95 latency around 497 ms under controlled login throttling
-- Intentional rate limiting on auth path while core data endpoints stay responsive
+- `SECRET_KEY`
+- `DATABASE_URL`
+- `OPENAI_API_KEY`
+- `QDRANT_URL`
+- `QDRANT_API_KEY`
+- `LLM_MODEL`
 
-## 7. Cloud Security Controls in Implementation
+## 9. Known Repository Boundary
 
-Cloud-layer security controls currently reflected in implementation and project security posture:
+This repository contains deployment/build/runtime configuration for ECS and CodeBuild.
 
-- Private database subnets with no public RDS exposure
-- Security-group scoped east-west traffic
-- Secret injection from Secrets Manager instead of static credentials
-- Container image scanning on ECR push
-- Health and log visibility for anomaly response
-- HTTPS and WAF controls included in production architecture and security documentation
+If full Terraform IaC is maintained externally or in a different folder/repository, keep this document synchronized with the actual source of truth used for production changes.
 
-## 8. Deployment Validation Checklist
+## 10. Recommended Improvements
 
-Run these checks after each deployment.
-
-### 8.1 Infrastructure Validation
-
-- Terraform apply completes with no drift errors
-- ALB DNS output is available
-- RDS endpoint output is available
-- ECR repositories contain freshly pushed image tags
-
-### 8.2 ECS Validation
-
-- Backend and AI services are ACTIVE
-- Desired count equals running count
-- No repetitive restart loop in task events
-- Task health checks pass
-
-### 8.3 Functional Validation
-
-- API documentation endpoint responds
-- Health endpoint responds
-- Backend can connect to RDS
-- Backend to AI internal call path succeeds
-
-### 8.4 Observability Validation
-
-- Logs visible in both ECS log groups
-- No startup secret resolution errors
-- No sustained 5xx spikes in ALB target metrics
-
-## 9. Gaps, Assumptions, and Next Hardening Steps
-
-Items to keep improving based on current implementation state:
-
-- Add explicit HTTPS listener and automatic HTTP to HTTPS redirect where not yet finalized
-- Add autoscaling policies for ECS services in Terraform layer
-- Add managed CloudWatch alarms and dashboards as code
-- Add formal blue-green deployment controller configuration for ECS services
-- Add Route 53 and ACM resources in Terraform for complete domain automation
-
-## 10. Cloud Cost and Capacity Baseline
-
-Current defaults in infrastructure variables show production-leaning but cost-aware sizing:
-
-- Backend tasks: 512 CPU, 1024 MB, desired count 2
-- AI service: 2048 CPU, 4096 MB, desired count 1
-- RDS default class: db.t3.small
-
-These values align with the observed workload profile and can be tuned through terraform/variables.tf based on traffic growth.
+1. codify autoscaling policies per ECS service
+2. codify CloudWatch alarms and dashboards
+3. enforce image vulnerability gates in CI
+4. add structured deployment rollback runbook

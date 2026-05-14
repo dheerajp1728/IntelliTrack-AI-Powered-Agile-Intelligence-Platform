@@ -20,10 +20,9 @@ All comprehensive documentation is organized in the [docs/](docs/) folder:
 
 - **[docs/CODE_DOCUMENTATION.md](docs/CODE_DOCUMENTATION.md)** — Full codebase architecture, API reference, models, and backend/frontend structure
 - **[docs/TEST_DOCUMENTATION.md](docs/TEST_DOCUMENTATION.md)** — Testing strategy, test coverage (85% backend, 75% frontend), load testing results, and security verification
-- **[docs/PRESENTATION.md](docs/PRESENTATION.md)** — Executive presentation with slides, architecture diagrams, and demo walkthrough
-- **[docs/CLOUD_DEPLOYMENT_SPEAKER_NOTES_QA.md](docs/CLOUD_DEPLOYMENT_SPEAKER_NOTES_QA.md)** — AWS deployment decisions and Q&A
 - **[docs/SECURITY_DOCUMENTATION.md](docs/SECURITY_DOCUMENTATION.md)** — Security hardening, OWASP compliance, and vulnerability mitigations
 - **[docs/CLOUD_DOCUMENTATION.md](docs/CLOUD_DOCUMENTATION.md)** — CloudWatch metrics, monitoring, and production operations
+- **[docs/README.md](docs/README.md)** — Documentation index and maintenance standards
 
 ### Demo & Testing
 
@@ -69,17 +68,12 @@ IntelliTrack-AI-Powered-Agile-Intelligence-Platform/
 │   ├── backend-task-definition.json
 │   ├── frontend-task-definition.json
 │   └── ai-service-task-definition.json
-├── terraform/                     # Infrastructure as Code
-│   ├── main.tf                   # VPC, RDS, ECS, ALB, WAF
-│   ├── variables.tf
-│   └── outputs.tf
 ├── docs/                          # ✨ Documentation (NEW)
 │   ├── CODE_DOCUMENTATION.md
 │   ├── TEST_DOCUMENTATION.md
-│   ├── PRESENTATION.md
 │   ├── SECURITY_DOCUMENTATION.md
 │   ├── CLOUD_DOCUMENTATION.md
-│   └── CLOUD_DEPLOYMENT_SPEAKER_NOTES_QA.md
+│   └── README.md
 ├── demo/                          # ✨ Demo & Seed Scripts (NEW)
 │   ├── CREDENTIALS.txt            # Demo user credentials
 │   ├── seed_v2.py                # AWS ECS seed script
@@ -90,7 +84,7 @@ IntelliTrack-AI-Powered-Agile-Intelligence-Platform/
 │   └── test_chat.py
 ├── requirements.txt               # Python dependencies
 ├── README.md                      # This file
-└── README_DEPLOYMENT.md           # AWS deployment guide
+└── render.yaml                    # Optional Render deployment config
 ```
 
 ---
@@ -266,15 +260,7 @@ locust -f load_test_p95.py
 docker-compose up -d
 ```
 
-### Deploy to AWS (Terraform)
-```bash
-cd terraform
-terraform init
-terraform plan
-terraform apply
-```
-
-See **[README_DEPLOYMENT.md](README_DEPLOYMENT.md)** for full AWS setup.
+See **[docs/CLOUD_DOCUMENTATION.md](docs/CLOUD_DOCUMENTATION.md)** for deployment details.
 
 ---
 
@@ -342,46 +328,3 @@ Built by 5 developers over 7 two-week sprints:
 ---
 
 **IntelliTrack** — Making sprint management smarter with AI. 🚀
-│   └── llm_analyzer.py        # LLM task analysis
-│
-├── intellitrack.db             # SQLite database
-└── requirements.txt            # Python dependencies
-```
-
----
-
-## Features at a Glance
-
-| Feature | Details |
-|---|---|
-| Issue types | Epic, Story, Task, Bug, SubTask, Spike, Tech Debt, Improvement |
-| Sprint management | Plan → Active → Complete with velocity tracking |
-| Board | Kanban with drag-and-drop across status columns |
-| Backlog | Ranked list with story points and sprint assignment |
-| Analytics | Velocity, burndown, cycle time, throughput |
-| Team | Developer profiles, workload capacity, skill tags |
-| Wiki | Hierarchical pages for team documentation |
-| Releases | Version management with status tracking |
-| Notifications | In-app alerts with read/unread state |
-| AI analysis | LLM-powered task completion scoring from repo code |
-| Auth | JWT tokens, bcrypt passwords, role-based permissions |
-
----
-
-## Team
-
-Built as part of a Software Engineering course project.
-
-| Name | Role |
-|---|---|
-| Raunak | Full Stack |
-| Vignesh | Full Stack |
-| Dhiraj | Full Stack |
-| Hemanesh | Full Stack |
-| Upasana | Full Stack |
-
----
-
-## License
-
-This project was built for academic purposes as part of a Software Engineering course.

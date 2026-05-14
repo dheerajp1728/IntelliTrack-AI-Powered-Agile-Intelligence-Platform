@@ -1,54 +1,114 @@
 # IntelliTrack Security Documentation
 
-This document outlines the security features implemented in IntelliTrack.
+## 1. Purpose
 
-## 1. Authentication and Authorization
+This document records the security controls implemented in IntelliTrack and how those controls are validated before release.
 
-- **JWT Authentication**: All protected endpoints require a valid JWT.
-- **Role-Based Access Control**: Admin-only endpoints enforce role checks.
-- **Password Hashing**: PBKDF2-SHA256 with per-password salt.
+## 2. Threat Model Summary
 
-## 2. Rate Limiting
+Main attack surfaces:
 
-- **Login Endpoint**: Limited to 10 requests/minute per IP.
-- **Global Rate Limiting**: Configured via slowapi middleware.
+1. public web/API endpoints
+2. authentication/token boundary
+3. service-to-service communication
+4. data store access and secret handling
 
-## 3. Data Protection
+Primary risks addressed:
 
-- **Secrets Management**: Sensitive keys stored in AWS Secrets Manager.
-- **Environment Variables**: Used for database credentials and API keys.
-- **Database Encryption**: RDS PostgreSQL with encrypted storage.
+- unauthorized access
+- credential compromise
+- brute-force attempts on login
+- injection attacks
+- cloud network misconfiguration
 
-## 4. Network Security
+## 3. Implemented Controls
 
-- **AWS WAF**: Protects against SQL injection and XSS.
-- **ALB Security Groups**: Restrict access to specific IP ranges.
-- **HTTPS**: Enforced via CloudFront and ACM SSL certificates.
+### 3.1 Authentication and authorization
 
-## 5. Code Security
+- JWT bearer authentication for protected APIs
+- role-based access checks via dependency injection
+- invalid token requests fail with `401`
+- insufficient role requests fail with `403`
 
-- **Parameterized Queries**: Prevent SQL injection.
-- **Input Validation**: Enforced via Pydantic schemas.
-- **Security Headers**: HSTS, X-Frame-Options, X-Content-Type-Options.
+Reference implementation:
 
-## 6. Monitoring and Alerts
+- `app/auth.py`
+- protected endpoints in `app/main.py`
 
-- **CloudWatch Alarms**: Alerts for high CPU/memory usage.
-- **Audit Logs**: Track user activity and API usage.
+### 3.2 Password security
 
-## 7. Vulnerability Testing
+- PBKDF2-HMAC-SHA256
+- 100,000 iterations
+- unique random salt per password
+- no plaintext storage
 
-- **OWASP ZAP**: Automated scans for common vulnerabilities.
-- **Manual Penetration Testing**: Focused on authentication and data access.
+### 3.3 API hardening
 
-## 8. Security Best Practices
+- schema validation through Pydantic
+- SQLAlchemy ORM (parameterized access pattern)
+- rate limiting with `slowapi` on auth paths
+- security headers middleware (nosniff, frame deny, HSTS, policy headers)
+- CORS allowlist via `ALLOWED_ORIGINS`
 
-- Rotate secrets regularly.
-- Use least privilege for IAM roles.
-- Enable multi-factor authentication (MFA) for AWS accounts.
+### 3.4 Secret management
 
-## 9. Future Improvements
+- required `SECRET_KEY` enforced at startup
+- runtime secrets expected via environment/secret manager
+- no production secret values in repository source
 
-- Implement IP whitelisting for admin endpoints.
-- Add anomaly detection for unusual API usage patterns.
-- Use AWS GuardDuty for advanced threat detection.
+### 3.5 Cloud/network controls
+
+- private service connectivity through ECS/Service Connect
+- controlled ingress through ALB and security groups
+- CloudWatch logging for investigation and audit trails
+
+## 4. Security Validation Process
+
+Validation activities:
+
+1. auth-negative tests (`401` and `403` paths)
+2. rate-limit verification (`429` on threshold)
+3. OWASP ZAP quick scan of API surface
+4. manual review of high-risk endpoints
+
+Sample scan command:
+
+```bash
+zap-cli quick-scan http://127.0.0.1:8000
+```
+
+## 5. Secure Development Practices
+
+Practices followed:
+
+- validate all external input at API boundary
+- keep auth logic centralized in `app/auth.py`
+- separate business logic, persistence, and transport concerns
+- avoid dynamic SQL string construction
+- use least-privilege cloud roles and scoped connectivity
+
+## 6. Incident Readiness (Current)
+
+Operational controls in place:
+
+- CloudWatch logs for runtime error/auth anomaly review
+- ECS health checks for automatic unhealthy task replacement
+- credential rotation supported through environment/secret updates
+
+## 7. Release Security Checklist
+
+Before release:
+
+1. `SECRET_KEY` and runtime secrets verified
+2. auth/role tests pass on critical routes
+3. no unresolved high-severity findings in security scan
+4. rate limiting confirmed on login/register flows
+5. CORS origin configuration verified
+
+## 8. Residual Risks and Next Steps
+
+Recommended improvements:
+
+1. add automated SAST/DAST in CI gate
+2. add anomaly alerts for suspicious auth traffic
+3. codify security policy checks for IaC/runtime drift

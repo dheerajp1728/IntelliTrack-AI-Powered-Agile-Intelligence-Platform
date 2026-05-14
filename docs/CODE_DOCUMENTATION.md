@@ -1,219 +1,232 @@
 # IntelliTrack Code Documentation
 
-This document explains the code structure, runtime architecture, and key API flows for IntelliTrack.
-
-## 1. System Overview
-
-IntelliTrack is split into three deployable services:
-
-- Frontend: React + Vite SPA
-- Backend API: FastAPI monolith for product features and auth
-- AI Service: FastAPI microservice for repository indexing and AI analysis
-
-High-level runtime flow:
-
-1. User opens frontend and logs in.
-2. Frontend calls backend endpoints with Bearer JWT.
-3. Backend serves agile features (projects, sprints, issues, analytics, wiki).
-4. AI requests go from backend to AI microservice (primary path).
-5. Backend has a fallback path that can call OpenAI and Qdrant directly.
-
-## 2. Repository Structure
-
-### Root app project
-
-- app/: backend Python application
-- frontend/: React client application
-- Agile-LLM-main/: AI analysis service
-- buildspec/: CI buildspec files for CodeBuild
-- docker/: Dockerfiles for backend, frontend, AI service
-- ecs/: ECS service/task config files
-
-### Backend package (app/)
-
-- main.py: FastAPI app setup, middleware, routes, AI fallback logic
-- auth.py: JWT creation/validation and password hashing
-- database.py: SQLAlchemy engine/session setup
-- models.py: SQLAlchemy ORM models and indexes
-- schemas.py: Pydantic request/response models
-- seed.py: seed data utilities
-
-### Frontend package (frontend/src/)
-
-- main.jsx: app bootstrap
-- App.jsx: app-level route wiring and shell
-- AuthContext.jsx: auth state, login/register/logout, token validation
-- workspace/: main product UI pages and workspace features
-- components/: shared UI components
-- lib/: utility modules
-
-### AI service package (Agile-LLM-main/)
-
-- main.py: FastAPI endpoints (/health, /progress, /chat)
-- code_indexer.py: repository fetch and embedding pipeline
-- qdrant_indexer.py: Qdrant integration
-- llm_analyzer.py: LLM task progress analysis
-- repo_code_fetcher.py: GitHub repository fetch helpers
-- test_scripts/test_api.py: API test script
-
-## 3. Backend Architecture
-
-### App bootstrap and middleware
-
-The backend app is initialized in app/main.py with:
-
-- CORS middleware using ALLOWED_ORIGINS
-- Security headers middleware (HSTS, frame options, nosniff)
-- IP-based rate limiting using slowapi
-- Auto table creation via SQLAlchemy metadata
-- Idempotent startup migrations for indexes and compatibility columns
-
-### Data layer
-
-- SQLAlchemy ORM models in app/models.py
-- Session lifecycle in app/database.py
-- Default local DB: SQLite file intellitrack.db
-- Production DB: PostgreSQL via DATABASE_URL
-
-Key modeled entities:
-
-- User, DeveloperProfile
-- Project, Sprint, Issue
-- Comment, ActivityLog, Notification
-- WikiPage, Label, Component, Release
-- Legacy Task model for backward compatibility
-
-### Authentication and authorization
-
-- JWT with HS256 in app/auth.py
-- Access token default expiry: 60 minutes
-- Passwords hashed with PBKDF2-SHA256 + per-password salt
-- Role-based checks for admin-only endpoints
-
-## 4. API Surface (Backend)
-
-The backend exposes a large REST API. Main route groups:
-
-- Auth: /auth/register, /auth/login, /auth/me, /auth/change-password
-- Users and profiles: /users, /users/{id}, /profiles, /profile/{user_id}
-- Project and sprint management: /projects, /sprints, sprint start/complete
-- Issue tracking: /issues, issue comments, activity, flagging
-- Collaboration: /wiki, /notifications
-- Planning metadata: /labels, /components, /releases
-- Analytics: /analytics/sprint/{id}, /analytics/velocity, /analytics/workload, /analytics/cycle-time, /analytics/throughput
-- Dashboard and search: /dashboard, /search
-- Skill and workload endpoints: project members, user skills/history/workload, assignee recommendation
-- AI gateway endpoints: /ai/health, /ai/analyze, /ai/chat
-
-For complete schemas and live testing, use the backend OpenAPI docs at /docs.
-
-## 5. AI Integration Design
-
-### Primary path
-
-When /ai/analyze or /ai/chat is called on the backend:
-
-1. Backend tries the AI microservice first using LLM_SERVICE_URL.
-2. AI microservice performs repository indexing/search and LLM analysis.
-3. Backend returns the AI microservice result.
-
-### Fallback path
-
-If AI microservice is unavailable:
-
-- Analyze fallback uses direct OpenAI prompt analysis.
-- Chat fallback embeds the question, searches Qdrant, and asks OpenAI with retrieved code context.
-
-This fallback prevents full feature outage during service discovery or DNS failures.
-
-## 6. Frontend Architecture
-
-Frontend is a Vite React app with API access through VITE_API_URL.
-
-Auth flow implemented in frontend/src/AuthContext.jsx:
-
-1. On startup, check token from localStorage.
-2. Validate token with GET /auth/me.
-3. Login/register stores access token in localStorage.
-4. Subsequent requests send Authorization: Bearer <token>.
-5. Logout clears local token and user state.
-
-Main UI capabilities include:
-
-- Dashboard views
-- Agile board and sprint workflows
-- Issue and backlog management
-- Analytics/reporting pages
-- Team and wiki modules
-
-## 7. Environment Variables
-
-### Backend required
-
-- SECRET_KEY: required for JWT signing
-
-### Backend optional/production
-
-- DATABASE_URL: DB connection string (SQLite default if omitted)
-- ALLOWED_ORIGINS: comma-separated CORS origins
-- OPENAI_API_KEY: enables OpenAI-backed AI fallback
-- LLM_SERVICE_URL: URL to AI microservice
-- QDRANT_URL: used for AI chat fallback search
-- QDRANT_API_KEY: optional Qdrant auth
-- LLM_MODEL: optional model name override for AI calls
-
-### Frontend
-
-- VITE_API_URL: backend base URL
-
-### AI service
-
-- OPENAI_API_KEY and model/env settings used by AI modules
-- Any GitHub token is passed per request to /progress when needed
-
-## 8. Local Development
-
-## 8.1 Backend
-
-- Install Python dependencies from requirements.txt
-- Set SECRET_KEY
-- Run: uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
-- Swagger: http://127.0.0.1:8000/docs
-
-## 8.2 Frontend
-
-- Install node dependencies in frontend/
-- Set VITE_API_URL (for example http://127.0.0.1:8000)
-- Run: npm run dev
-
-## 8.3 AI service
-
-- Install dependencies in Agile-LLM-main/
-- Ensure Qdrant is reachable
-- Set OPENAI_API_KEY (or service-specific model settings)
-- Run: uvicorn main:app --host 127.0.0.1 --port 8004
-
-## 9. Build and Deployment Files
-
-- Docker images:
-  - docker/Dockerfile.backend
-  - docker/Dockerfile.frontend
-  - docker/Dockerfile.ai-service
-- AWS task definitions and service config in ecs/
-- CI buildspecs in buildspec/
-- Infra as code in terraform/
-- Helper scripts in scripts/
-
-Related deployment docs:
-
-- README_DEPLOYMENT.md
-- AWS_DEPLOYMENT_BLUEPRINT.md
-- QUICK_START.md
-- TROUBLESHOOTING.md
-
-## 10. Notes for Contributors
-
-- Keep DB changes idempotent where possible (startup migration pattern is used).
-- Preserve backward compatibility for legacy task endpoints when modifying issue workflows.
-- When adding API routes, update both frontend integrations and this documentation.
-- For AI features, validate both primary (LLM service) and fallback behavior.
+## 1. Purpose
+
+This document explains how the IntelliTrack codebase is organized, how the main modules work, and where to extend functionality safely.
+
+Intended audience:
+- course evaluators
+- maintainers and contributors
+- new team members
+
+## 2. System Architecture
+
+IntelliTrack is a 3-service application:
+
+1. Frontend: React + Vite (user interface)
+2. Backend: FastAPI + SQLAlchemy (product/business API)
+3. AI Service: FastAPI + Qdrant + OpenAI integration (analysis/chat)
+
+High-level request flow:
+
+1. User interacts with frontend.
+2. Frontend sends API calls with `Authorization: Bearer <token>`.
+3. Backend validates JWT and role permissions.
+4. Backend reads/writes relational data through SQLAlchemy.
+5. Backend calls AI service for AI-dependent endpoints.
+
+## 3. Repository Structure
+
+Core folders in this repository:
+
+- `app/`: backend API source
+- `frontend/`: frontend source
+- `Agile-LLM-main/`: AI microservice source
+- `docs/`: technical documentation
+- `buildspec/`: AWS CodeBuild definitions
+- `docker/`: Dockerfiles for all services
+- `ecs/`: ECS Service Connect configuration
+- `demo/`: demo credentials and data seed scripts
+- `test_scripts/`: load and utility test scripts
+
+## 4. Backend Implementation (`app/`)
+
+### 4.1 Entry point: `app/main.py`
+
+Main responsibilities:
+- FastAPI app creation
+- CORS configuration via `ALLOWED_ORIGINS`
+- security headers middleware
+- API route registration
+- rate limiting using `slowapi`
+- startup migrations (idempotent index/column setup)
+- DB initialization (`Base.metadata.create_all`) and seed call
+
+Security/operational middleware implemented:
+- `X-Content-Type-Options: nosniff`
+- `X-Frame-Options: DENY`
+- `X-XSS-Protection`
+- `Referrer-Policy`
+- `Permissions-Policy`
+- `Strict-Transport-Security`
+
+Rate limiting examples:
+- `/auth/register`: `5/minute`
+- `/auth/login`: `10/minute`
+
+### 4.2 Authentication: `app/auth.py`
+
+Auth model:
+- JWT (HS256) using `python-jose`
+- token subject (`sub`) stores user email
+- token TTL from `ACCESS_TOKEN_EXPIRE_MINUTES` (currently 60 minutes)
+
+Password model:
+- PBKDF2-HMAC-SHA256
+- 100,000 iterations
+- per-password random salt
+- storage format: `salt$hash`
+
+Key dependencies:
+- `get_current_user_from_request()` validates bearer token on protected routes
+- `check_user_role(required_roles)` for role-gated endpoints
+
+### 4.3 Database: `app/database.py`
+
+Storage strategy:
+- local fallback: SQLite (`sqlite:///./intellitrack.db`)
+- cloud: PostgreSQL via `DATABASE_URL`
+
+Important behavior:
+- auto-normalizes `postgres://` to `postgresql://`
+- SQLAlchemy connection pooling enabled (`pool_pre_ping`, `pool_recycle`)
+
+### 4.4 Data model: `app/models.py`
+
+Primary entities:
+- `User`
+- `DeveloperProfile`
+- `Project`
+- `Sprint`
+- `Issue`
+- `Comment`
+- `ActivityLog`
+- `Notification`
+- `WikiPage`
+- `Component`
+- `Label`
+- `Release`
+
+Compatibility note:
+- `Task` model is retained for backward compatibility.
+- Core workflow is issue-centric (`Issue` table and related endpoints).
+
+Notable indexing:
+- `ix_issues_project_id`
+- `ix_issues_sprint_id`
+- `ix_issues_assignee_id`
+- `ix_issues_status`
+- `ix_issues_project_sprint`
+
+### 4.5 API contracts: `app/schemas.py`
+
+Pydantic schemas define request/response boundaries for:
+- auth (`UserLogin`, `UserRegister`, `Token`)
+- profiles (`ProfileCreate`, `ProfileResponse`)
+- project/sprint/issue CRUD
+- analytics and dashboard payloads
+
+## 5. Frontend Implementation (`frontend/`)
+
+Key files:
+- `frontend/src/main.jsx`: app bootstrap
+- `frontend/src/App.jsx`: route/layout composition
+- `frontend/src/AuthContext.jsx`: auth lifecycle and token persistence
+
+Auth behavior in frontend:
+- reads `VITE_API_URL`
+- stores JWT in `localStorage`
+- validates token on startup by calling `/auth/me`
+- clears invalid token and user state automatically
+
+Workspace UI modules (under `frontend/src/workspace/`) provide:
+- board/backlog workflows
+- sprint and issue interaction
+- analytics/dashboard views
+
+## 6. AI Service Implementation (`Agile-LLM-main/`)
+
+Key files:
+- `main.py`: AI API endpoints
+- `llm_analyzer.py`: LLM analysis pipeline
+- `qdrant_indexer.py`: vector database integration
+- `code_indexer.py`: repository indexing/retrieval
+- `repo_code_fetcher.py`: GitHub code fetch helpers
+- `test_scripts/test_api.py`: service tests
+
+Published AI endpoints:
+- `GET /health`
+- `POST /progress`
+- `POST /chat`
+
+Operational behavior in `POST /progress`:
+- validates GitHub access
+- indexes repository content into Qdrant
+- retrieves relevant code chunks
+- performs LLM task-progress analysis
+
+## 7. Configuration and Environment Variables
+
+### Backend (`app/`)
+
+- `SECRET_KEY` (required)
+- `DATABASE_URL`
+- `ALLOWED_ORIGINS`
+- `LLM_SERVICE_URL`
+- `OPENAI_API_KEY`
+- `QDRANT_URL`
+- `QDRANT_API_KEY`
+- `LLM_MODEL`
+
+### Frontend (`frontend/`)
+
+- `VITE_API_URL`
+
+### AI service (`Agile-LLM-main/`)
+
+- `OPENAI_API_KEY`
+- `LLM_MODEL`
+- Qdrant connection/runtime variables
+
+## 8. Build and Runtime Artifacts
+
+Container definitions:
+- `docker/Dockerfile.backend`
+- `docker/Dockerfile.frontend`
+- `docker/Dockerfile.ai-service`
+
+Cloud build definitions:
+- `buildspec/buildspec-backend.yml`
+- `buildspec/buildspec-frontend.yml`
+- `buildspec/buildspec-ai-service.yml`
+
+Service connectivity configuration:
+- `ecs/service-connect-backend.json`
+- `ecs/service-connect-ai-service.json`
+
+## 9. Engineering Conventions
+
+Conventions followed:
+- schema-validated API boundaries (Pydantic)
+- separated auth/business/data concerns
+- idempotent startup migrations and indexes
+- explicit role checks for sensitive operations
+- reproducible container builds per service
+
+## 10. Extension Guide
+
+When adding a new backend feature:
+
+1. add/adjust ORM fields in `app/models.py`
+2. add Pydantic contracts in `app/schemas.py`
+3. add endpoints in `app/main.py`
+4. secure endpoint with auth/role dependency
+5. add/update tests
+6. update relevant docs in `docs/`
+
+When adding a new AI capability:
+
+1. add endpoint in `Agile-LLM-main/main.py`
+2. implement retrieval/analyzer logic in AI modules
+3. wire backend gateway call if needed
+4. add API tests in `Agile-LLM-main/test_scripts/`
