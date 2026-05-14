@@ -278,19 +278,6 @@ See **[README_DEPLOYMENT.md](README_DEPLOYMENT.md)** for full AWS setup.
 
 ---
 
-## 📚 Documentation
-
-Comprehensive documentation is in the **[docs/](docs/)** folder:
-
-1. **[CODE_DOCUMENTATION.md](docs/CODE_DOCUMENTATION.md)** — Architecture, API endpoints, models
-2. **[TEST_DOCUMENTATION.md](docs/TEST_DOCUMENTATION.md)** — Testing strategy, coverage, how to run tests
-3. **[PRESENTATION.md](docs/PRESENTATION.md)** — Project presentation slides and demo script
-4. **[SECURITY_DOCUMENTATION.md](docs/SECURITY_DOCUMENTATION.md)** — Security hardening, OWASP, vulnerabilities fixed
-5. **[CLOUD_DOCUMENTATION.md](docs/CLOUD_DOCUMENTATION.md)** — CloudWatch, monitoring, production ops
-6. **[CLOUD_DEPLOYMENT_SPEAKER_NOTES_QA.md](docs/CLOUD_DEPLOYMENT_SPEAKER_NOTES_QA.md)** — Architecture decisions, Q&A
-
----
-
 ## 🎮 Try the Live Demo
 
 **URL:** http://intellitrack-alb-1279061505.us-east-1.elb.amazonaws.com
